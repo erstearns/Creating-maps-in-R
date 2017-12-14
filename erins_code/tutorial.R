@@ -6,6 +6,7 @@
 
 rm(list = ls()) 
 
+# ---------------------------------------- Setting up environment --------------------------------------------#
 # Load necessary packages
-x <- c("data.table","reshape2","ggmap", "rgdal", "rgeos", "maptools", "dplyr", "tidyr", "tmap")
+x <- c("data.table","reshape2","ggmap", "rgdal", "rgeos", "maptools", "dplyr", "tidyr", "tmap","sf")
 lapply(x, require, character.only = TRUE)
