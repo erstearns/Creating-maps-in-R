@@ -14,7 +14,7 @@ lapply(x, require, character.only = TRUE)
 
 # --------------------------------------- Part II: Spatial data in R ----------------------------------------- #
 # load london sport data shapefile - pop of London boroughs in 2001 and % pop participating in sporting activities
-lnd <- readOGR(dsn = "data/london_sport.shp")
+lnd <- readOGR("data/london_sport.shp")
 
 # ---- structure of spatial data ----
 #access data slot: non-geographic attribute data
@@ -105,4 +105,88 @@ plot(lnd[sel, ], col = "turquoise", add = TRUE) # add selected zones to map
     tm_borders(lwd = 9)
   
   
-  # --------------------------------------- Part III: Creating and manipulating spatial data ------------------------------ #
+# --------------------------------------- Part III: Creating and manipulating spatial data ------------------------------ #
+  
+# ---- creating new spatial data ----
+vec <- vector(mode = "numeric", length = 3)
+df <- data.frame(x = 1:3, y = c(1/2, 2/3, 3/4))
+
+#to creata  spatial object, must be a numeric matrix or data frame
+sp1 <- SpatialPoints(coords = df)
+
+#check class
+class(sp1)
+
+#creat spatial object with data frame added -- allows for non-spatial data to be added
+spdf <- SpatialPointsDataFrame(sp1, data = df)
+class(spdf)
+
+# ---- projections: setting and transforming CRS in R ----
+
+#spatial data should always have a CRS -- if no CRS information provided, and correct CRS known, can be set:
+proj4string(lnd) <- NA_character_ #remove CRS info from lnd
+proj4string(lnd) <- CRS("+init=epsg:27700") #assign a new CRS
+
+#the above code changes the CRS but does not reproject the data
+#EPSG codes best way to refer to different projections. the following code searchs the list of available EPSG codesa and creates
+#a new version of lnd in WSG84
+
+EPSG <- make_EPSG() #create data frame of available EPSG codes
+#search for WGS 84 code
+# a planar CRS is defined by a projection, datum and a set of parameters
+#   - parameters describe things like where the center of the map is; number of parameters depends on the projectsion -- important to document
+EPSG[grepl("WGS 84$", EPSG$note),]
+# * Geographic CRS: A coordinate reference system based on a geodetic datum and using an ellipsoidal (including spherical) model 
+#                of the Earth. This provides an accurate representation of the geometry of geographic features for a large portion 
+#                of the Earth’s surface. Geographic coordinate reference systems can be two- or three-dimensional. A Geographic 2D 
+#                CRS is used when positions of features are described on the surface of the ellipsoid through latitude and longitude 
+#                coordinates; a Geographic 3D CRS is used when positions are described on, above or below the ellipsoid and includes 
+#                height above the ellipsoid. [...]
+# * Geocentric CRS: A coordinate reference system based on a geodetic datum that deals with the Earth’s curvature by taking the 3D 
+#                spatial view, which obviates the need to model the curvature. The origin of a geocentric CRS is at the centre of mass 
+#                of the Earth.
+
+#convert coordinates of lnd into WGS 84 CRS, reproject & save
+lnd84 <- spTransform(lnd, CRS("+init=epsg:4326"))
+#works as well?
+lnd84_e <- spTransform(lnd, CRS("+proj=longlat +datum=WGS84 +no_defs"))
+#save as .Rds bc .RData is more restrictive and maintains object's name
+saveRDS(object = lnd84, file = "data/lnd84.Rds") #will use in part IV
+saveRDS(object = lnd84_e, file = "data/lnd84_e.Rds") #will use in part IV -- my version
+
+#now we can remove the lnd84 object
+rm(lnd84)
+rm(lnd84_e)
+
+# ---- attribute joins ----
+
+#print attribute names
+names(lnd)
+
+#re-read in london sport file
+lnd <- readOGR("data/london_sport.shp")
+plot(lnd)
+
+# going to join non-spatial crime data stored in a csv
+# each row in csv represents a single crime, thus going to aggregate crimes to the borough level to prep for join to lnd
+crime_data <- read.csv("data/mps-recordedcrime-borough.csv",stringsAsFactors = F)
+
+#extract theft & handling crimes and save
+crime_theft <- crime_data[crime_data$CrimeType == "Theft & Handling",]
+
+#calculate sum of crime count for each district and save
+crime_ag <- aggregate(CrimeCount ~ Borough, FUN=sum, data=crime_theft)
+
+#prior to joining on borough names, compare name columns
+lnd$name %in% crime_ag$Borough
+
+#grab rows that don't match
+lnd$name[!lnd$name %in% crime_ag$Borough]
+
+#left join to lnd bc want the length of df to remain unchanged, with vars from new data appended in cols
+lnd@data <- left_join(lnd@data, crime_ag, by=c('name' = 'Borough'))
+
+#plot using tmap function 'quick thematic map plot' (qtm)
+qtm(lnd, "CrimeCount") #plot basic map
+
+# ---- clipping and spatial joins ----
