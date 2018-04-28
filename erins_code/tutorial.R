@@ -8,9 +8,9 @@ rm(list = ls())
 
 # ---------------------------------------- Setting up environment --------------------------------------------#
 # Load necessary packages
-x <- c("reshape2","data.table","ggmap", "rgdal", "rgeos", "maptools", "dplyr", "tidyr", "tmap","sf")
-lapply(x, require, character.only = TRUE)
-
+#x <- c("reshape2","data.table","ggmap", "rgdal", "rgeos", "maptools", "dplyr", "tidyr", "tmap","sf")
+#lapply(x, require, character.only = TRUE)
+pacman::p_load(reshape2,data.table,ggmap, rgdal, rgeos, maptools, dplyr, tidyr, tmap,sf)
 
 # --------------------------------------- Part II: Spatial data in R ----------------------------------------- #
 # load london sport data shapefile - pop of London boroughs in 2001 and % pop participating in sporting activities
@@ -189,4 +189,104 @@ lnd@data <- left_join(lnd@data, crime_ag, by=c('name' = 'Borough'))
 #plot using tmap function 'quick thematic map plot' (qtm)
 qtm(lnd, "CrimeCount") #plot basic map
 
+#trying to to make it a bit different
+qtm(lnd, fill="CrimeCount", fill.n = 8, fill.palette = "div",
+    fill.title = "Thefts", fill.position="topright",
+    format = "World", style="gray")
+#from r code on repo:
+lnd$Thefts = lnd$CrimeCount / 10000
+qtm(lnd, "Thefts", fill.title = "Thefts\n(10000)", fill.n = 8,fill.palette = "div",scale = 0.8) +
+   tm_layout(legend.position = c(0.89,0.02))
+
+# -- From QTM help examples:
+data("World","metro")
+qtm(World)
+qtm(World, fill = "economy", format="World", style="col_blind")
+
+qtm(World, fill="HPI", fill.n=9, fill.palette="div", fill.auto.palette.mapping=FALSE, 
+    fill.title="Happy Planet Index", fill.id="name", format="World", style="gray")
+
+# bubble map
+qtm(World, borders = NULL) + 
+  qtm(metro, symbols.size = "pop2010", 
+      symbols.title.size= "Metropolitan Areas", 
+      symbols.id= "name",
+      format = "World")
+
+
 # ---- clipping and spatial joins ----
+# create new stations object - transport infrastructure points -- using the "lnd-stns" shapefile.
+stations <- readOGR(dsn = "data/lnd-stns.shp")
+# stations = read_shape("data/lnd-stns.shp") # from tmap
+
+# comparing the CRS of both lnd and stations objects prior to attempting a spatial join
+proj4string(stations) # this is the full geographical detail.
+proj4string(lnd) # what's the coordinate reference system (CRS)
+bbox(stations) # the extent, 'bounding box' of stations
+bbox(lnd) # return the bounding box of the lnd object
+
+# the CRS differs between the two objects, the lnd is the official CRS for the UK, thus will set
+# stations to that CRS; also, stations is unprojected, so wil project as well
+stations <- spTransform(stations, CRS(proj4string(lnd))) #proj4string sets the CRS and spTransform projects it
+
+#plot
+plot(lnd)
+points(stations)
+
+#spatial extent of stations is beyond lnd
+#Want to clip the stations so that only those falling within London boroughs are retained 
+#we can use sp::over,or simply the square bracket notation for subsetting tabular data 
+#(enter ?gIntersects to find out another way to do this):
+stations <- stations[lnd,]
+plot(lnd)
+points(stations)
+
+#plotting other things - not in pdf, found in intro-spatial.R script in repo
+#aggregate stations to borough level
+stations_agg = aggregate(x = stations["CODE"], by = lnd, FUN = length)
+head(stations_agg@data)
+
+#create new var in lnd to match borough count of transport infrastructure points code in stations_agg
+lnd$n_points = stations_agg$CODE
+
+#get average number of stations per borough
+lnd_n = aggregate(stations["NUMBER"], by = lnd, FUN = mean)
+
+## ----fig.cap="Choropleth map of mean values of stations in each borough"----
+#create quantiles
+brks = quantile(lnd_n$NUMBER)
+labs = grey.colors(n = 4) # shouldn't this be 5 vals? 0,25,50,75,100? -- cutting below does not work with n=5
+#convert numeric to factor -- divide the range of NUMBER into intervals and codes in NUMBER 
+#  according to which interval they fall
+q = cut(lnd_n$NUMBER, brks, labels = labs, 
+        include.lowest = T)
+summary(q) # check what we've created - 4 factors containing counts of the boroughs in each
+
+#convert and plot
+qc = as.character(q) # convert to character class to plot
+plot(lnd_n, col = qc) # plot (not shown in printed tutorial)
+legend(legend = paste0("Q", 1:4), fill = levels(q), "topright")
+areas = sapply(lnd_n@polygons, function(x) x@area) #this creates a vector of areas for each borough
+
+#
+levels(stations$LEGEND) # see A roads and rapid transit stations (RTS) (not shown)
+sel = grepl("A Road Sing|Rapid", stations$LEGEND) # selection for plotting
+sym = as.integer(stations$LEGEND[sel]) # subset to selection aboce and convert to symbols
+points(stations[sel,], pch = sym) #plot
+legend(legend = c("A Road", "RTS"), "bottomright", pch = unique(sym))
+
+## ---- echo=FALSE, eval=FALSE---------------------------------------------
+## # , fig.cap="Symbol levels for train station types in London"
+## q = cut(lnd_n$NUMBER, breaks= c(quantile(lnd_n$NUMBER)), include.lowest=T)
+## clr = as.character(factor(q, labels = paste0("grey", seq(20, 80, 20))))
+## plot(lnd_n, col = clr)
+## legend(legend = paste0("q", 1:4), fill = paste0("grey", seq(20, 80, 20)), "topright")
+## sel = grepl("A Road Sing|Rapid", stations$LEGEND) # selection for plotting
+## sym = as.integer(stations$LEGEND[sel]) # symbols
+## points(stations[sel,], pch = sym)
+## legend(legend = c("A Road", "RTS"), "bottomright", pch = unique(sym))
+
+# --------------------------------------- Part IV: Making maps with tmap, ggplot2 and leaflet ---- #
+# ---- tmap ----
+qtm(shp = lnd, fill = "Partic_Per", fill.palette = "-Blues") # not shown
+qtm(shp = lnd, fill = c("Partic_Per", "Pop_2001"), fill.palette = "Blues", ncol = 2)
