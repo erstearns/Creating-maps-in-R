@@ -4,13 +4,31 @@
 # Date: 12.14.2017
 #############################################
 
+# ---------------------------------------- summary notes of most helpfiul bits ------------------#
+
+#package: sp
+bbox() #retrieves spatial bounding from spatial data
+
+#package: tmap
+tmap_mode("view") #set tmap mode to interactive viewing
+
+#package: ggplot2
+fortify() #converts spatial data to a dataframe, which is required format for using ggmap
+
+#package: OpenStreetMap
+#  -- tricky installation, set java path:
+#Sys.setenv(JAVA_HOME='C:\\Program Files\\Java\\jre1.8.0_144\\')
+
+# -----------------------------------------------------------------------------------------------#
 rm(list = ls()) 
 
 # ---------------------------------------- Setting up environment --------------------------------------------#
 # Load necessary packages
 #x <- c("reshape2","data.table","ggmap", "rgdal", "rgeos", "maptools", "dplyr", "tidyr", "tmap","sf")
 #lapply(x, require, character.only = TRUE)
-pacman::p_load(reshape2,data.table,ggmap, rgdal, rgeos, maptools, dplyr, tidyr, tmap,sf)
+pacman::p_load(reshape2,data.table,ggmap, rgdal, rgeos, maptools, dplyr, tidyr, tmap,sf,
+               leaflet,tmaptools,OpenStreetMap)
+#need to checkout java library to get OpenStreetMap pkg working properly
 
 # --------------------------------------- Part II: Spatial data in R ----------------------------------------- #
 # load london sport data shapefile - pop of London boroughs in 2001 and % pop participating in sporting activities
@@ -288,5 +306,135 @@ legend(legend = c("A Road", "RTS"), "bottomright", pch = unique(sym))
 
 # --------------------------------------- Part IV: Making maps with tmap, ggplot2 and leaflet ---- #
 # ---- tmap ----
+#code from pdf
 qtm(shp = lnd, fill = "Partic_Per", fill.palette = "-Blues") # not shown
+#code from pdf
 qtm(shp = lnd, fill = c("Partic_Per", "Pop_2001"), fill.palette = "Blues", ncol = 2)
+
+## ---- fig.cap="Facetted map of London Boroughs created by tmap"----------
+#from pdf
+tm_shape(lnd) +
+  tm_fill("Pop_2001", thres.poly = 0) +
+  tm_facets("name", free.coords = TRUE, drop.units = TRUE)
+#from intro-spatial.R
+tm_shape(lnd) +
+  tm_fill("Pop_2001", thres.poly = 0) +
+  tm_facets("name", free.coords=TRUE, drop.shapes=TRUE) +
+  tm_layout(legend.show = FALSE, title.position = c("center", "center"), title.size = 20)
+
+
+# to create a basemap in R, you can use the read_osm function, from the tmaptools package as follows.
+# * Note that you must first transform the data into a geographical CRS:*
+
+# Transform the coordinate reference system
+lnd_wgs = spTransform(lnd, CRS("+init=epsg:4326"))
+if(curl::has_internet()) {
+  osm_tiles = tmaptools::read_osm(bbox(lnd_wgs)) # download images from OSM with the same boundaries as our london layer
+  tm_shape(osm_tiles) + tm_raster() +
+    tm_shape(lnd_wgs) +
+    tm_fill("Pop_2001", fill.title = "Population, 2001", scale = 0.8, alpha = 0.5) +
+    tm_layout(legend.position = c(0.89, 0.02))
+} else {
+  tm_shape(lnd_wgs) +
+    tm_fill("Pop_2001", fill.title = "Population, 2001", scale = 0.8, alpha = 0.5) +
+    tm_layout(legend.position = c(0.89, 0.02))
+}
+
+#Another way to make tmap maps have a basemap is by entering tmap_mode("view"). 
+#This will make the maps appear on a zoomable webmap powered by leaflet.
+tmap_mode("view")
+if(curl::has_internet()) {
+  osm_tiles = tmaptools::read_osm(bbox(lnd_wgs)) # download images from OSM with the same boundaries as our london layer
+  tm_shape(osm_tiles) + tm_raster() +
+    tm_shape(lnd_wgs) +
+    tm_fill("Pop_2001", fill.title = "Population, 2001", scale = 0.8, alpha = 0.5) +
+    tm_layout(legend.position = c(0.89, 0.02))
+} else {
+  tm_shape(lnd_wgs) +
+    tm_fill("Pop_2001", fill.title = "Population, 2001", scale = 0.8, alpha = 0.5) +
+    tm_layout(legend.position = c(0.89, 0.02))
+}
+
+
+# ---- ggmap ----
+
+#convert pop from factor to numeric var
+lnd$Pop_2001 <- as.numeric(as.character(lnd$Pop_2001))
+
+#create a scatter plot from attribute data
+p <- ggplot(lnd@data, aes(Partic_Per, Pop_2001))
+
+# add layers - e.g. add text to the plot
+p + geom_point(aes(colour = Partic_Per, size = Pop_2001)) +
+  geom_text(size = 2, aes(label = name))
+
+# will create a map to show the percentage of the population in each London Borough
+#  who regularly participate in sports activities
+
+# IMPORTANT NOTE: ggmap requires spatial data to be supplied as data.frame, using fortify()
+# The generic plot() function can use Spatial* objects directly; ggplot2 cannot.   
+#  Therefore we need to extract them as a data frame. The fortify function was written 
+#  specifically for this purpose. For this to work, either the maptools or rgeos
+#  packages must be installed.
+
+#fortify london shapefile
+lnd_f <- fortify(lnd)
+
+#The fortify() application step has lost the attribute information associated with the lnd object
+#We can add it back using the left_join function from the dplyr package 
+head(lnd_f, n = 2) # peak at the fortified data
+lnd$id <- row.names(lnd) # allocate an id variable to the sp data
+head(lnd@data, n = 2) # final check before join (requires shared variable name)
+lnd_f <- left_join(lnd_f, lnd@data) # join the data
+
+#now data ready
+map <- ggplot(lnd_f, aes(long, lat, group = group, fill = Partic_Per)) +
+  geom_polygon() + coord_equal() +
+  labs(x = "Easting (m)", y = "Northing (m)",
+       fill = "% Sports\nParticipation") +
+  ggtitle("London Sports Participation")
+
+#the map above in black and white:
+map + scale_fill_gradient(low = "white", high = "black")
+
+
+# ---- creating interactive maps with leaflet ----
+
+#leaflet has tight integration with RStudio for making interactive online visualizations
+#load the lnd dataset we reprojected to WGS 84 in Part III
+lnd84 <- readRDS('data/lnd84.Rds')
+#load my test one
+lnd84_e <- readRDS('data/lnd84_e.Rds')
+
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = lnd84)
+
+# ---- advanced task: faceting for maps ----
+
+#bring in london historic pop (1801-2001) data and tidy up
+london_data <- read.csv("data/census-historic-population-borough.csv")
+ltidy <- gather(london_data, date, pop, -Area.Code, -Area.Name)
+
+#merge historic pop data with london borough spatial object
+ltidy <- rename(ltidy, ons_label = Area.Code) # rename Area.code variable
+lnd_f <- left_join(lnd_f, ltidy)
+
+#rename date var
+lnd_f$date <- gsub(pattern = "Pop_", replacement = "", lnd_f$date)
+
+#using faceting, can produce map for each year
+ggplot(data = lnd_f, # the input data
+       aes(x = long, y = lat, fill = pop/1000, group = group)) + # define variables
+  geom_polygon() + # plot the boroughs
+  geom_path(colour="black", lwd=0.05) + # borough borders
+  coord_equal() + # fixed x and y scales
+  facet_wrap(~ date) + # one plot per time slice
+  scale_fill_gradient2(low = "blue", mid = "grey", high = "red", # colors
+                       midpoint = 150, name = "Population\n(thousands)") + # legend options
+  theme(axis.text = element_blank(), # change the theme options
+        axis.title = element_blank(), # remove axis titles
+        axis.ticks = element_blank()) # remove axis ticks
+
+#save 
+# ggsave("figure/facet_london.png", width = 9, height = 9) # save figure
