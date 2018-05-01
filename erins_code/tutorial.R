@@ -439,3 +439,33 @@ ggplot(data = lnd_f, # the input data
 #save 
 # ggsave("figure/facet_london.png", width = 9, height = 9) # save figure
 
+#challenges: 
+# Challenge 1: Try creating this plot for the % of population instead of the absolute population.
+#need to create a total pop for london across all boroughs for each year
+
+#not done yet
+#convert to data table
+test <- as.data.table(lnd_f)
+#create total for the year
+test[,total:=sum(pop),by=date]
+#create percent of total for each row
+test[,perc_tot:=((pop/total)*100)]
+#convert back to a datafram
+lnd_pt <- as.data.frame(test)
+
+#plot
+ggplot(data = lnd_pt, # the input data
+       aes(x = long, y = lat, fill = perc_tot, group = group)) + # define variables
+  geom_polygon() + # plot the boroughs
+  geom_path(colour="black", lwd=0.05) + # borough borders
+  coord_equal() + # fixed x and y scales
+  facet_wrap(~ date) + # one plot per time slice
+  scale_fill_gradient2(low = "blue", mid = "grey", high = "red", # colors
+                       midpoint = 150, name = "Percent London population\nliving in borough") + # legend options
+  theme(axis.text = element_blank(), # change the theme options
+        axis.title = element_blank(), # remove axis titles
+        axis.ticks = element_blank()) # remove axis ticks
+
+# Challenge 2: For bonus points, try creating an animation of London’s evolving population over
+#              time (hint: a file called ggnaminate.R may help).
+
